@@ -22,7 +22,7 @@ Pi 会话 ── 适配器（本地扩展）── 官方 SDK ── MemoryCore�
    │
    ├─ before_agent_start → 召回 L0-L3 + 相关技能，注入为「不可信」上下文
    ├─ agent_settled      → 采集回合（L0 走 durable outbox；技能 at-most-once）
-   └─ 命令 / 工具        → setup / status / sync-skills / 4 个只读搜索工具
+   └─ 命令 / 工具        → setup / status / 补偿 / forget / sync-skills / 4 个只读搜索工具
 ```
 
 **设计价值观（为什么可以放心用）。**
@@ -80,33 +80,33 @@ L1–L3 由 MemoryCore 根据已采集的对话异步生成；适配器只读取
 以下流程从干净克隆开始，不依赖全局安装的 Pi：
 
 ```powershell
-git clone https://github.com/TencentCloud/TencentDB-Agent-Memory.git
-cd TencentDB-Agent-Memory\adapters\pi
+git clone https://github.com/kbob3687-hub/pi-agent-memory-adapter.git
+cd pi-agent-memory-adapter
 node --version # 必须为 v22.19.0 或更高
 npm ci
 npm run check
 npm run verify:pi-load
 ```
 
-`verify:pi-load` 会用锁定版本的 Pi 开发依赖启动离线 RPC，并断言 `/tdai-memory-setup` 和 `/tdai-memory-status` 都已注册；它不需要 Memory 密钥，也不会调用模型。
+`verify:pi-load` 会用锁定版本的 Pi 开发依赖启动离线 RPC，并断言所有适配器命令都已注册；它不需要 Memory 密钥，也不会调用模型。
 
 ### 两种加载方式
 
 开发迭代时，以工作区源码临时启动一次 Pi：
 
 ```powershell
-cd E:\path\to\TencentDB-Agent-Memory
-./adapters/pi/node_modules/.bin/pi.cmd -e (Resolve-Path ./adapters/pi)
+cd E:\path\to\pi-agent-memory-adapter
+./node_modules/.bin/pi.cmd -e (Resolve-Path .)
 ```
 
 要为一个项目持久安装本地包（Pi 只会写入 `<项目>/.pi/settings.json`），在该项目目录执行：
 
 ```powershell
-pi install -l E:\path\to\TencentDB-Agent-Memory\adapters\pi --approve
+pi install -l E:\path\to\pi-agent-memory-adapter --approve
 pi list
 ```
 
-修改扩展源码后，可再次使用第一条命令加载最新源码；或者执行 `pi update E:\path\to\TencentDB-Agent-Memory\adapters\pi --approve` 更新本地包。
+修改扩展源码后，可再次使用第一条命令加载最新源码；或者执行 `pi update E:\path\to\pi-agent-memory-adapter --approve` 更新本地包。
 
 目前包仍为开发期 `private`，还不能从 npm / Pi Gallery 安装；发布前需要维护者确认包名与 npm scope 权限。
 
@@ -215,7 +215,16 @@ Skills 默认关闭（`skills.enabled` 默认 `false`）。开启后，适配器
 ### 维护者验收清单
 
 1. `npm run check` 通过。
-2. `npm run verify:pi-load` 报告 `/tdai-memory-setup` 和 `/tdai-memory-status` 已注册。
+2. `npm run verify:pi-load` 报告所有适配器命令都已注册。
+
+## 手动补偿与遗忘
+
+需要显式处理本地队列时，可在 Pi 中运行：
+
+- `/tdai-memory-flush` 立即补投待处理的 L0 普通记忆采集。
+- `/tdai-memory-retry-skills` 在确认可能重复投递的风险后，手动重试 Skill 记录。
+- `/tdai-memory-cleanup-skills` 清理当前身份下已隔离的 Skill `.dead` 记录，但会保留 uncertain 记录。
+- `/tdai-memory-forget <关键词>` 展示脱敏预览，并在确认后删除匹配的 L1 记忆和 L0 对话证据；L2/L3 画像仍需在 Memory Hub 中删除。
 3. 通过 `/tdai-memory-setup` 配置专用测试 Agent 后，`/tdai-memory-status` 显示 `memory: ready`。
 4. 用 Pi 发一条短问题，再新开会话问相关问题；第一轮结束应显示 `memory: captured`，第二轮开始前应显示 `memory: recalled`。
 
@@ -224,7 +233,7 @@ Skills 默认关闭（`skills.enabled` 默认 `false`）。开启后，适配器
 ## 开发检查
 
 ```powershell
-cd adapters\pi
+cd pi-agent-memory-adapter
 npm ci
 npm run check
 npm run verify:pi-load
@@ -240,8 +249,8 @@ npm run pack:check
 先启动 Docker。可传入现有部署 `.env`，也可直接导出 `MEMORY_LLM_BASE_URL`、`MEMORY_LLM_API_KEY` 和 `MEMORY_LLM_MODEL`：
 
 ```powershell
-cd adapters\pi
-npm run e2e:l0-l3 -- --managed-core --env-file ../../deploy/global-images/.env
+cd pi-agent-memory-adapter
+npm run e2e:l0-l3 -- --managed-core --env-file C:\path\to\memory.env
 ```
 
 任何一层为空、Pi hook 中缺少任意 L0–L3 分段，或缺少不可信记忆边界，命令都会硬失败。输出只包含脱敏后的临时 ID，不会显示 LLM 或 Memory 密钥；成功和失败都会移除临时容器与数据。该检查会发起真实模型请求，因此会消耗 Token。
@@ -254,9 +263,9 @@ npm run e2e:l0-l3 -- --managed-core --env-file ../../deploy/global-images/.env
 - `npm run e2e:lifecycle` 用锁定的真实 Pi 0.84.1 RPC 模式验证三条可靠性承诺：(1) 重启不会重复采集已安顿的回合——预先在文件 outbox 里放一条未投递采集，Pi 启动时恰好投递一次，再次重启不再投递，且观察到 Pi 加载会话时从不重发 `agent_settled`；(2) RPC `fork` 命令产出新会话 id、在 header 记录源文件为 `parentSession`、保留 `tdai-memory/branch@1` 标记，使分叉落到各自隔离的 Memory 会话；(3) 服务中断不丢记忆也不重复——在一条采集仍排队时停掉 MemoryCore，Pi 仍能正常启动（fail-open）且记录保持 pending，服务恢复后新 Pi 恰好投递一次，再次重启不再投递。
 
 ```powershell
-cd adapters\pi
-npm run e2e:setup -- --env-file ../../deploy/global-images/.env
-npm run e2e:lifecycle -- --env-file ../../deploy/global-images/.env
+cd pi-agent-memory-adapter
+npm run e2e:setup -- --env-file C:\path\to\memory.env
+npm run e2e:lifecycle -- --env-file C:\path\to\memory.env
 ```
 
 ### 真实 Skills 闭环 E2E
@@ -264,8 +273,8 @@ npm run e2e:lifecycle -- --env-file ../../deploy/global-images/.env
 - `npm run e2e:skill` 用同一套一次性 MemoryCore 容器验证完整 Skill 学习闭环：(1) 向 `/v3/skill/conversation/add` 提交一段真实的"排查 Node CI 构建 OOM"对话（含 40 KB+ 构建日志，跨过服务端字节归档阈值），断言单次追加即返回 `archived`；(2) 等真实 LLM 审查模型从对话中抽取出一个可复用技能，断言它能被 `/v3/skill/list` 列出；(3) 用真实 Pi 0.84.1 加载适配器并开启 `skills.enabled`，断言该技能以第五层 `[Skill]` 形式进入 `before_agent_start` 的不可信召回 system prompt。与 L0–L3 相同：Pi 本身不发回答模型请求，模型消耗只来自 MemoryCore 抽取。
 
 ```powershell
-cd adapters\pi
-npm run e2e:skill -- --managed-core --env-file ../../deploy/global-images/.env
+cd pi-agent-memory-adapter
+npm run e2e:skill -- --managed-core --env-file C:\path\to\memory.env
 ```
 
 ## 卸载

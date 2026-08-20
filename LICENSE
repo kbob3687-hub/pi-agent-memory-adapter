@@ -1,9 +1,9 @@
-Tencent is pleased to support the open source community by making TencentDB Agent Memory available. 
+Copyright (C) 2026 xiaosuantongkk. All rights reserved.
 
-Copyright (C) 2026 Tencent.  All rights reserved. 
+The Pi adapter for TencentDB Agent Memory is licensed under the MIT.
 
-TencentDB Agent Memory is licensed under the MIT.
-
+It is built on top of the official TencentDB Agent Memory SDK and service,
+which remain under their own licenses (MIT, Copyright (C) 2026 Tencent).
 
 Terms of the MIT:
 --------------------------------------------------------------------
