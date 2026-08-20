@@ -46,6 +46,7 @@ describe("persistent capture outbox", () => {
     let now = new Date("2026-08-14T00:00:00.000Z");
     const options = { directory, now: () => now, retryDelayMs: () => 1_000 };
     const first = await enqueueCapture(config, "pi-one", [{ role: "user", content: "first" }], options);
+    now = new Date(now.getTime() + 1);
     const second = await enqueueCapture(config, "pi-two", [{ role: "user", content: "second" }], options);
     const attempted: string[] = [];
 
@@ -117,6 +118,7 @@ describe("persistent capture outbox", () => {
     let now = new Date("2026-08-14T00:00:00.000Z");
     const options = { directory, now: () => now, retryDelayMs: () => 1_000 };
     const first = await enqueueCapture(config, "pi-one", [{ role: "user", content: "broken" }], options);
+    now = new Date(now.getTime() + 1);
     const second = await enqueueCapture(config, "pi-two", [{ role: "user", content: "later" }], options);
     const attempted: string[] = [];
 
