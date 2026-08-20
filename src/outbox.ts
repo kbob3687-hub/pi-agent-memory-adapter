@@ -205,7 +205,7 @@ export async function enqueueCapture(
   const record: CaptureRecord = {
     version: OUTBOX_VERSION,
     id: randomUUID(),
-    createdAt: new Date().toISOString(),
+    createdAt: (options.now?.() ?? new Date()).toISOString(),
     scope: scopeFor(config),
     sessionId,
     messages,
